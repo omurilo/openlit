@@ -4,18 +4,11 @@ set -e
 # Generate and persist NextAuth.js secret to ensure session persistence across restarts
 NEXTAUTH_SECRET_FILE="/app/client/data/.nextauth_secret"
 
-if [ -f "$NEXTAUTH_SECRET_FILE" ]; then
-    # Load existing secret from persistent volume
-    export NEXTAUTH_SECRET=$(cat "$NEXTAUTH_SECRET_FILE")
-    echo "✅ Loaded existing NextAuth secret from persistent storage"
-elif [ -n "$NEXTAUTH_SECRET" ]; then
+if [ -n "$NEXTAUTH_SECRET" ]; then
     echo "Using provided NEXTAUTH_SECRET environment variable"
 else
     # Generate new secret and save it to persistent volume
     export NEXTAUTH_SECRET=$(openssl rand -base64 32)
-    echo "$NEXTAUTH_SECRET" > "$NEXTAUTH_SECRET_FILE"
-    chmod 600 "$NEXTAUTH_SECRET_FILE"
-    echo "✅ Generated and saved new NextAuth secret to persistent storage"
 fi
 
 # Set NextAuth.js environment variables
@@ -36,7 +29,6 @@ else
     echo "WARNING: /etc/environment is not writable; NEXTAUTH_URL will not be persisted there." >&2
 fi
 
-echo "SQLITE_DATABASE_URL=${SQLITE_DATABASE_URL:-file:../data/data.db}" >> /etc/environment
 echo "PATH=./node_modules/.bin:$PATH" >> /etc/environment
 
 # Environment variables for DB config
@@ -49,12 +41,8 @@ echo "INIT_DB_DATABASE=${INIT_DB_DATABASE}" >> /etc/environment
 # Load the environment variables
 . /etc/environment
 
-# Run Prisma migrations and generate prisma client
-prisma migrate deploy
-prisma generate
-
-# Run the seed 
-prisma db seed
+# Run the ClickHouse seed script
+node /app/client/scripts/seed.js
 
 # Run crond in the background
 service cron start

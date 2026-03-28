@@ -5,14 +5,18 @@ import {
 	OPENLIT_RULE_ENTITIES_TABLE_NAME,
 } from "@/lib/platform/rule-engine/table-details";
 import { OPENLIT_CONTEXTS_TABLE_NAME } from "@/lib/platform/context/table-details";
+import { getOnClusterClause, getMergeTreeEngine } from "@/clickhouse/cluster-config";
 import migrationHelper from "./migration-helper";
 
 const MIGRATION_ID = "create-rule-engine-table";
 
 export default async function CreateRuleEngineMigration(databaseConfigId?: string) {
+	const onCluster = getOnClusterClause();
+	const engine = getMergeTreeEngine();
+
 	const queries = [
 		`
-      CREATE TABLE IF NOT EXISTS ${OPENLIT_RULES_TABLE_NAME} (
+      CREATE TABLE IF NOT EXISTS ${OPENLIT_RULES_TABLE_NAME} ${onCluster} (
         id UUID DEFAULT generateUUIDv4(),
         name String,
         description String DEFAULT '',
@@ -22,19 +26,19 @@ export default async function CreateRuleEngineMigration(databaseConfigId?: strin
         created_at DateTime DEFAULT now(),
         updated_at DateTime DEFAULT now(),
         PRIMARY KEY id
-      ) ENGINE = MergeTree() ORDER BY (id, created_at);
+      ) ENGINE = ${engine} ORDER BY (id, created_at);
     `,
 		`
-      CREATE TABLE IF NOT EXISTS ${OPENLIT_RULE_CONDITION_GROUPS_TABLE_NAME} (
+      CREATE TABLE IF NOT EXISTS ${OPENLIT_RULE_CONDITION_GROUPS_TABLE_NAME} ${onCluster} (
         id UUID DEFAULT generateUUIDv4(),
         rule_id UUID,
         condition_operator String DEFAULT 'AND',
         created_at DateTime DEFAULT now(),
         PRIMARY KEY id
-      ) ENGINE = MergeTree() ORDER BY (id, rule_id, created_at);
+      ) ENGINE = ${engine} ORDER BY (id, rule_id, created_at);
     `,
 		`
-      CREATE TABLE IF NOT EXISTS ${OPENLIT_RULE_CONDITIONS_TABLE_NAME} (
+      CREATE TABLE IF NOT EXISTS ${OPENLIT_RULE_CONDITIONS_TABLE_NAME} ${onCluster} (
         id UUID DEFAULT generateUUIDv4(),
         rule_id UUID,
         group_id UUID,
@@ -44,10 +48,10 @@ export default async function CreateRuleEngineMigration(databaseConfigId?: strin
         data_type String DEFAULT 'string',
         created_at DateTime DEFAULT now(),
         PRIMARY KEY id
-      ) ENGINE = MergeTree() ORDER BY (id, rule_id, group_id);
+      ) ENGINE = ${engine} ORDER BY (id, rule_id, group_id);
     `,
 		`
-      CREATE TABLE IF NOT EXISTS ${OPENLIT_RULE_ENTITIES_TABLE_NAME} (
+      CREATE TABLE IF NOT EXISTS ${OPENLIT_RULE_ENTITIES_TABLE_NAME} ${onCluster} (
         id UUID DEFAULT generateUUIDv4(),
         rule_id UUID,
         entity_type LowCardinality(String),
@@ -55,10 +59,10 @@ export default async function CreateRuleEngineMigration(databaseConfigId?: strin
         created_by String,
         created_at DateTime DEFAULT now(),
         PRIMARY KEY id
-      ) ENGINE = MergeTree() ORDER BY (id, rule_id, entity_type);
+      ) ENGINE = ${engine} ORDER BY (id, rule_id, entity_type);
     `,
 		`
-      CREATE TABLE IF NOT EXISTS ${OPENLIT_CONTEXTS_TABLE_NAME} (
+      CREATE TABLE IF NOT EXISTS ${OPENLIT_CONTEXTS_TABLE_NAME} ${onCluster} (
         id UUID DEFAULT generateUUIDv4(),
         name String,
         content String,
@@ -70,7 +74,7 @@ export default async function CreateRuleEngineMigration(databaseConfigId?: strin
         created_at DateTime DEFAULT now(),
         updated_at DateTime DEFAULT now(),
         PRIMARY KEY id
-      ) ENGINE = MergeTree() ORDER BY (id, created_at);
+      ) ENGINE = ${engine} ORDER BY (id, created_at);
     `,
 	];
 

@@ -13,8 +13,8 @@ WORKDIR /app/client
 # Copy package.json and package-lock.json to the working directory & the rest of the application code
 COPY ./client/ .
 
-# Install dependencies, generate Prisma client & Build the Next.js application
-RUN npm install && npx prisma generate && npm run build
+# Install dependencies & Build the Next.js application
+RUN npm install && npm run build
 
 
 # Opamp server build from source - pinned with digest
@@ -89,15 +89,12 @@ WORKDIR /app/client
 
 # Copying the standalone next.js build
 COPY --from=builder /app/client/.next/standalone ./
-# Standalone build doesn't copy public, static, prisma, scripts
+# Standalone build doesn't copy public, static, scripts
 COPY --from=builder /app/client/public ./public
 COPY --from=builder /app/client/.next/static ./.next/static
-COPY --from=builder /app/client/prisma ./prisma
 COPY --from=builder /app/client/scripts ./scripts
-# Copying prisma client, prisma and prisma cli (.bin) from builder stage
-COPY --from=builder /app/client/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder /app/client/node_modules/.bin ./node_modules/.bin
-COPY --from=builder /app/client/node_modules/prisma ./node_modules/prisma
+# Copy @clickhouse/client for the seed script (standalone build may not trace it)
+COPY --from=builder /app/client/node_modules/@clickhouse ./node_modules/@clickhouse
 
 # Copy the built opamp-server binary from go-builder stage
 COPY --from=go-builder /app/opamp-server/opamp-server /app/opamp/opamp-server

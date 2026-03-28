@@ -1,7 +1,7 @@
-import { DatabaseConfig as PrismaDatabaseConfig } from "@prisma/client";
+import { DatabaseConfig as DatabaseConfigModel } from "@/lib/models";
 import { MouseEventHandler } from "react";
 
-export interface DatabaseConfig extends PrismaDatabaseConfig {}
+export interface DatabaseConfig extends DatabaseConfigModel {}
 
 export type DatabaseConfigTabItemProps = {
 	id: string;

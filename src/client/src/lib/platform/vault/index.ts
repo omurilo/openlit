@@ -163,10 +163,12 @@ export async function getSecretsFromDatabaseId(
 		err || getMessage().NO_API_KEY
 	);
 
+	const validApiInfo = apiInfo!;
+
 	const { err: secretErr, data: secretData } = await getSecrets(
 		{
 			...filters,
-			databaseConfigId: apiInfo.databaseConfigId,
+			databaseConfigId: validApiInfo.databaseConfigId,
 		},
 		{ selectValue: true }
 	);

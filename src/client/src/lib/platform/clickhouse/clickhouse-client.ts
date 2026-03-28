@@ -1,6 +1,6 @@
 import { constructURL, parseQueryStringToObject } from "@/utils/parser";
 import { ClickHouseClient, createClient } from "@clickhouse/client";
-import { DatabaseConfig } from "@prisma/client";
+import { DatabaseConfig } from "@/lib/models";
 import { createPool, Pool } from "generic-pool";
 import asaw from "@/utils/asaw";
 

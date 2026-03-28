@@ -31,18 +31,18 @@ export async function POST(request: NextRequest) {
 		}
 
 		// Run the migration
-		const result = await migrateOpengroundDataToClickhouse(dbConfig.id);
+		const [error, result] = await asaw(migrateOpengroundDataToClickhouse(dbConfig.id));
 
-		if (result.err) {
+		if (error) {
 			return NextResponse.json(
-				{ error: result.err, details: result.details },
+				{ error: error.message || String(error), details: error },
 				{ status: 500 }
 			);
 		}
 
 		return NextResponse.json({
 			message: "Migration completed successfully",
-			result: result.data,
+			result: result?.data,
 		});
 	} catch (error: any) {
 		console.error("Migration API error:", error);

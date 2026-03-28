@@ -1,19 +1,99 @@
 services:
-  clickhouse:
+  # ---- ClickHouse Keeper quorum (3 nodes) ----
+  clickhouse-keeper-1:
+    image: clickhouse/clickhouse-keeper:24.4.1
+    container_name: clickhouse-keeper-1
+    environment:
+      KEEPER_SERVER_ID: "1"
+    volumes:
+      - keeper-1-data:/var/lib/clickhouse
+      - ./assets/clickhouse-keeper-config.xml:/etc/clickhouse-keeper/config.d/keeper.xml:ro
+    networks:
+      - ch-cluster
+    restart: always
+
+  clickhouse-keeper-2:
+    image: clickhouse/clickhouse-keeper:24.4.1
+    container_name: clickhouse-keeper-2
+    environment:
+      KEEPER_SERVER_ID: "2"
+    volumes:
+      - keeper-2-data:/var/lib/clickhouse
+      - ./assets/clickhouse-keeper-config.xml:/etc/clickhouse-keeper/config.d/keeper.xml:ro
+    networks:
+      - ch-cluster
+    restart: always
+
+  clickhouse-keeper-3:
+    image: clickhouse/clickhouse-keeper:24.4.1
+    container_name: clickhouse-keeper-3
+    environment:
+      KEEPER_SERVER_ID: "3"
+    volumes:
+      - keeper-3-data:/var/lib/clickhouse
+      - ./assets/clickhouse-keeper-config.xml:/etc/clickhouse-keeper/config.d/keeper.xml:ro
+    networks:
+      - ch-cluster
+    restart: always
+
+  # ---- ClickHouse Server replica 1 ----
+  clickhouse-1:
     image: clickhouse/clickhouse-server:24.4.1
-    container_name: clickhouse
+    container_name: clickhouse-1
     environment:
       CLICKHOUSE_PASSWORD: ${OPENLIT_DB_PASSWORD:-OPENLIT}
       CLICKHOUSE_USER: ${OPENLIT_DB_USER:-default}
       CLICKHOUSE_DATABASE: ${OPENLIT_DB_NAME:-openlit}
+      CLICKHOUSE_CLUSTER: openlit_cluster
+      CLICKHOUSE_REPLICA: replica-1
       CLICKHOUSE_ALWAYS_RUN_INITDB_SCRIPTS: true
     volumes:
-      - clickhouse-data:/var/lib/clickhouse
+      - clickhouse-1-data:/var/lib/clickhouse
       - ./assets/clickhouse-config.xml:/etc/clickhouse-server/config.d/custom-config.xml:ro
+      - ./assets/clickhouse-cluster-config.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
       - ./assets/clickhouse-init.sh:/docker-entrypoint-initdb.d/init.sh:ro
     ports:
       - "9000:9000"
       - "8123:8123"
+    depends_on:
+      - clickhouse-keeper-1
+      - clickhouse-keeper-2
+      - clickhouse-keeper-3
+    networks:
+      - ch-cluster
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user=$${CLICKHOUSE_USER} --password=$${CLICKHOUSE_PASSWORD} --query='SELECT 1' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 100s
+    restart: always
+
+  # ---- ClickHouse Server replica 2 ----
+  clickhouse-2:
+    image: clickhouse/clickhouse-server:24.4.1
+    container_name: clickhouse-2
+    environment:
+      CLICKHOUSE_PASSWORD: ${OPENLIT_DB_PASSWORD:-OPENLIT}
+      CLICKHOUSE_USER: ${OPENLIT_DB_USER:-default}
+      CLICKHOUSE_DATABASE: ${OPENLIT_DB_NAME:-openlit}
+      CLICKHOUSE_CLUSTER: openlit_cluster
+      CLICKHOUSE_REPLICA: replica-2
+      CLICKHOUSE_ALWAYS_RUN_INITDB_SCRIPTS: true
+    volumes:
+      - clickhouse-2-data:/var/lib/clickhouse
+      - ./assets/clickhouse-config.xml:/etc/clickhouse-server/config.d/custom-config.xml:ro
+      - ./assets/clickhouse-cluster-config.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
+      - ./assets/clickhouse-init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+    ports:
+      - "9001:9000"
+      - "8124:8123"
+    depends_on:
+      - clickhouse-keeper-1
+      - clickhouse-keeper-2
+      - clickhouse-keeper-3
+    networks:
+      - ch-cluster
     healthcheck:
       test: ["CMD-SHELL", "clickhouse-client --user=$${CLICKHOUSE_USER} --password=$${CLICKHOUSE_PASSWORD} --query='SELECT 1' || exit 1"]
       interval: 5s
@@ -23,16 +103,16 @@ services:
     restart: always
 
   openlit:
-    image: ghcr.io/openlit/openlit:latest
+    image: flashapp/flashstage.service.openlit:latest
     container_name: openlit
     environment:
       TELEMETRY_ENABLED: "true"
-      INIT_DB_HOST: clickhouse
+      INIT_DB_HOST: clickhouse-1
       INIT_DB_PORT: 8123
       INIT_DB_DATABASE: ${OPENLIT_DB_NAME:-openlit}
       INIT_DB_USERNAME: ${OPENLIT_DB_USER:-default}
       INIT_DB_PASSWORD: ${OPENLIT_DB_PASSWORD:-OPENLIT}
-      SQLITE_DATABASE_URL: file:/app/client/data/data.db
+      CLICKHOUSE_CLUSTER: openlit_cluster
       PORT: ${PORT:-3000}
       DOCKER_PORT: ${PORT:-3000}
       
@@ -59,10 +139,13 @@ services:
       - "4317:4317"  # OTLP gRPC receiver
       - "4318:4318"  # OTLP HTTP receiver
     depends_on:
-      clickhouse:
+      clickhouse-1:
         condition: service_healthy
+      clickhouse-2:
+        condition: service_healthy
+    networks:
+      - ch-cluster
     volumes:
-      - openlit-data:/app/client/data
       - ./assets/otel-collector-config.yaml:/etc/otel/otel-collector-config.yaml
     healthcheck:
       test: ["CMD", "curl", "-f", "http://openlit:3000"]
@@ -72,6 +155,14 @@ services:
       start_period: 30s
     restart: always
 
+networks:
+  ch-cluster:
+    driver: bridge
+
 volumes:
-  clickhouse-data:
+  clickhouse-1-data:
+  clickhouse-2-data:
+  keeper-1-data:
+  keeper-2-data:
+  keeper-3-data:
   openlit-data:

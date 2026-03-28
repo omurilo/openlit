@@ -1,21 +1,53 @@
 import { compare, genSaltSync, hashSync } from "bcrypt-ts";
-import prisma from "./prisma";
+import {
+	systemQuery,
+	systemQueryFirst,
+	systemInsert,
+	systemExec,
+} from "./system-db";
 import asaw from "@/utils/asaw";
 import { getCurrentUser } from "./session";
-import { User } from "@prisma/client";
+import { User } from "@/lib/models";
+import { generateId } from "@/lib/id";
 import { moveSharedDBConfigToDBUser } from "./db-config";
 import { moveInvitationsToMembership } from "./organisation";
 import getMessage from "@/constants/messages";
 
-function exclude<User extends Record<string, unknown>, K extends keyof User>(
-	user: User,
-	keys: K[] = ["password"] as K[]
-): Omit<User, K> {
+interface UserRow {
+	id: string;
+	name: string | null;
+	email: string;
+	email_verified: string | null;
+	password: string | null;
+	image: string | null;
+	has_completed_onboarding: number;
+	created_at: string;
+	updated_at: string;
+}
+
+function rowToUser(r: UserRow): User {
+	return {
+		id: r.id,
+		name: r.name,
+		email: r.email,
+		emailVerified: r.email_verified ? new Date(r.email_verified) : null,
+		password: r.password,
+		image: r.image,
+		hasCompletedOnboarding: !!r.has_completed_onboarding,
+		createdAt: new Date(r.created_at),
+		updatedAt: new Date(r.updated_at),
+	};
+}
+
+function exclude<T extends object, K extends keyof T>(
+	user: T,
+	keys: K[] = ["password" as unknown as K] as K[]
+): Omit<T, K> {
 	return Object.fromEntries(
 		Object.entries(user).filter(([key]) =>
 			typeof keys.includes === "function" ? !keys.includes(key as K) : true
 		)
-	) as Omit<User, K>;
+	) as Omit<T, K>;
 }
 
 export const getUserByEmail = async ({
@@ -26,18 +58,18 @@ export const getUserByEmail = async ({
 	selectPassword?: boolean;
 }) => {
 	if (!email) throw new Error("No email Provided");
-	
+
 	// Normalize email to lowercase for case-insensitive comparison
 	const normalizedEmail = email.toLowerCase().trim();
-	
-	const user = await prisma.user.findUnique({
-		where: {
-			email: normalizedEmail,
-		},
-	});
 
-	if (!user) throw new Error("No user with this email exists");
+	const row = await systemQueryFirst<UserRow>(
+		`SELECT * FROM openlit_users WHERE email = {email:String} LIMIT 1`,
+		{ email: normalizedEmail }
+	);
 
+	if (!row) throw new Error("No user with this email exists");
+
+	const user = rowToUser(row);
 	return exclude(user, selectPassword ? [] : undefined);
 };
 
@@ -49,14 +81,14 @@ export const getUserById = async ({
 	selectPassword?: boolean;
 }) => {
 	if (!id) return null;
-	const user = await prisma.user.findUnique({
-		where: {
-			id,
-		},
-	});
+	const row = await systemQueryFirst<UserRow>(
+		`SELECT * FROM openlit_users WHERE id = {id:String} LIMIT 1`,
+		{ id }
+	);
 
-	if (!user) return null;
+	if (!row) return null;
 
+	const user = rowToUser(row);
 	return exclude(user, selectPassword ? [] : undefined);
 };
 
@@ -72,27 +104,45 @@ export const createNewUser = async (
 ) => {
 	// Normalize email to lowercase for case-insensitive comparison
 	const normalizedEmail = email.toLowerCase().trim();
-	
-	const [, existingUser] = await asaw(getUserByEmail({ email: normalizedEmail }));
+
+	const [, existingUser] = await asaw(
+		getUserByEmail({ email: normalizedEmail })
+	);
 	if (existingUser) throw new Error("User already exists! Please signin!");
 
 	const hashedPassword = getHashedPassword(password);
+	const id = generateId();
+	const now = new Date().toISOString();
 
-	let createdUser = await prisma.user.create({
-		data: {
+	await systemInsert("openlit_users", [
+		{
+			id,
 			email: normalizedEmail,
 			password: hashedPassword,
-			hasCompletedOnboarding: false,
+			has_completed_onboarding: 0,
+			name: null,
+			email_verified: null,
+			image: null,
+			created_at: now,
+			updated_at: now,
 		},
-	});
+	]);
 
-	if (createdUser?.id) {
-		await moveSharedDBConfigToDBUser(normalizedEmail, createdUser.id);
-		await moveInvitationsToMembership(normalizedEmail, createdUser.id);
-		return exclude(createdUser, options?.selectPassword ? [] : undefined);
-	}
+	const createdUser: User = {
+		id,
+		email: normalizedEmail,
+		password: hashedPassword,
+		hasCompletedOnboarding: false,
+		name: null,
+		emailVerified: null,
+		image: null,
+		createdAt: new Date(now),
+		updatedAt: new Date(now),
+	};
 
-	throw new Error("Cannot create a user!");
+	await moveSharedDBConfigToDBUser(normalizedEmail, createdUser.id);
+	await moveInvitationsToMembership(normalizedEmail, createdUser.id);
+	return exclude(createdUser, options?.selectPassword ? [] : undefined);
 };
 
 export const updateUser = async ({
@@ -104,10 +154,45 @@ export const updateUser = async ({
 }) => {
 	if (!where || !Object.keys(where).length)
 		throw new Error("No where clause defined");
-	return await prisma.user.update({
-		where,
-		data,
-	});
+
+	const sets: string[] = [];
+	const fieldMap: Record<string, string> = {
+		name: "name",
+		email: "email",
+		image: "image",
+		password: "password",
+		hasCompletedOnboarding: "has_completed_onboarding",
+	};
+
+	for (const [key, col] of Object.entries(fieldMap)) {
+		if (data[key] !== undefined) {
+			if (key === "hasCompletedOnboarding") {
+				sets.push(`${col} = ${data[key] ? 1 : 0}`);
+			} else {
+				const escaped = String(data[key]).replace(/'/g, "\\'");
+				sets.push(`${col} = '${escaped}'`);
+			}
+		}
+	}
+	sets.push(`updated_at = now64(3)`);
+
+	let condition = "";
+	if (where.id) condition = `id = '${where.id}'`;
+	else if (where.email) condition = `email = '${where.email.toLowerCase().trim()}'`;
+	else throw new Error("Unsupported where clause");
+
+	await systemExec(
+		`ALTER TABLE openlit_users UPDATE ${sets.join(", ")} WHERE ${condition}`
+	);
+
+	// Return the updated user
+	const row = await systemQueryFirst<UserRow>(
+		where.id
+			? `SELECT * FROM openlit_users WHERE id = {id:String} LIMIT 1`
+			: `SELECT * FROM openlit_users WHERE email = {email:String} LIMIT 1`,
+		where.id ? { id: where.id } : { email: where.email.toLowerCase().trim() }
+	);
+	return row ? rowToUser(row) : null;
 };
 
 export const updateUserProfile = async ({

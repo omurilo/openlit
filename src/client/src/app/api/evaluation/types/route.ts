@@ -75,14 +75,13 @@ export async function POST(request: NextRequest) {
 
 	const normalizedTypes = types.map(normalizeTypeConfig);
 
-	const prisma = (await import("@/lib/prisma")).default;
+	const { systemExec } = await import("@/lib/system-db");
 	const meta = jsonParse((config as any).meta || "{}") as Record<string, any>;
 	meta.evaluationTypes = normalizedTypes;
 
-	await prisma.evaluationConfigs.update({
-		where: { id: config.id },
-		data: { meta: jsonStringify(meta) },
-	});
+	await systemExec(
+		`ALTER TABLE openlit_evaluation_configs UPDATE meta = '${jsonStringify(meta).replace(/'/g, "\\'")}', updated_at = now64(3) WHERE id = '${config.id}'`
+	);
 
 	await syncRuleEntitiesFromConfig();
 

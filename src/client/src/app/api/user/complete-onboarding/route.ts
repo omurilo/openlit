@@ -1,4 +1,4 @@
-import prisma from "@/lib/prisma";
+import { systemExec } from "@/lib/system-db";
 import { getCurrentUser } from "@/lib/session";
 import asaw from "@/utils/asaw";
 
@@ -11,10 +11,9 @@ export async function POST() {
 		});
 	}
 
-	await prisma.user.update({
-		where: { id: user.id },
-		data: { hasCompletedOnboarding: true },
-	});
+	await systemExec(
+		`ALTER TABLE openlit_users UPDATE has_completed_onboarding = 1, updated_at = now64(3) WHERE id = '${user.id}'`
+	);
 
 	return Response.json({ success: true });
 }

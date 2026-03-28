@@ -3,15 +3,25 @@ set -e
 
 echo "==================== ClickHouse Initialization ===================="
 
+# Cluster support: when CLICKHOUSE_CLUSTER is set, use ON CLUSTER and ReplicatedMergeTree
+if [ -n "${CLICKHOUSE_CLUSTER}" ]; then
+  ON_CLUSTER="ON CLUSTER '${CLICKHOUSE_CLUSTER}'"
+  ENGINE="ReplicatedMergeTree"
+  echo "Cluster mode enabled: ${CLICKHOUSE_CLUSTER}"
+else
+  ON_CLUSTER=""
+  ENGINE="MergeTree"
+  echo "Single-node mode (no cluster)"
+fi
 
-clickhouse-client --query "CREATE DATABASE IF NOT EXISTS ${CLICKHOUSE_DATABASE}"
+clickhouse-client --query "CREATE DATABASE IF NOT EXISTS ${CLICKHOUSE_DATABASE} ${ON_CLUSTER}"
 
-echo "✅ Database $CLICKHOUSE_DATABASE created successfully"
+echo "Database $CLICKHOUSE_DATABASE created successfully"
 echo ""
 echo "Creating OTEL tables required by OpenTelemetry Collector..."
 
 clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
-CREATE TABLE IF NOT EXISTS otel_traces
+CREATE TABLE IF NOT EXISTS otel_traces ${ON_CLUSTER}
 (
     \`Timestamp\` DateTime64(9) CODEC(Delta(8), ZSTD(1)),
     \`TraceId\` String CODEC(ZSTD(1)),
@@ -42,7 +52,7 @@ CREATE TABLE IF NOT EXISTS otel_traces
     INDEX idx_span_attr_value mapValues(SpanAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_duration Duration TYPE minmax GRANULARITY 1
 )
-ENGINE = MergeTree
+ENGINE = ${ENGINE}
 PARTITION BY toDate(Timestamp)
 ORDER BY (ServiceName, SpanName, toDateTime(Timestamp))
 TTL toDateTime(Timestamp) + toIntervalHour(730)
@@ -50,7 +60,7 @@ SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1
 "
 
 clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
-CREATE TABLE IF NOT EXISTS otel_logs
+CREATE TABLE IF NOT EXISTS otel_logs ${ON_CLUSTER}
 (
     \`Timestamp\` DateTime64(9) CODEC(Delta(8), ZSTD(1)),
     \`TimestampTime\` DateTime DEFAULT toDateTime(Timestamp),
@@ -77,7 +87,7 @@ CREATE TABLE IF NOT EXISTS otel_logs
     INDEX idx_log_attr_value mapValues(LogAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_body Body TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 8
 )
-ENGINE = MergeTree
+ENGINE = ${ENGINE}
 PARTITION BY toDate(TimestampTime)
 PRIMARY KEY (ServiceName, TimestampTime)
 ORDER BY (ServiceName, TimestampTime, Timestamp)
@@ -86,7 +96,7 @@ SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1
 "
 
 clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
-CREATE TABLE IF NOT EXISTS otel_metrics_gauge
+CREATE TABLE IF NOT EXISTS otel_metrics_gauge ${ON_CLUSTER}
 (
     \`ResourceAttributes\` Map(LowCardinality(String), String) CODEC(ZSTD(1)),
     \`ResourceSchemaUrl\` String CODEC(ZSTD(1)),
@@ -116,7 +126,7 @@ CREATE TABLE IF NOT EXISTS otel_metrics_gauge
     INDEX idx_attr_key mapKeys(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_attr_value mapValues(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1
 )
-ENGINE = MergeTree
+ENGINE = ${ENGINE}
 PARTITION BY toDate(TimeUnix)
 ORDER BY (ServiceName, MetricName, Attributes, toUnixTimestamp64Nano(TimeUnix))
 TTL toDateTime(TimeUnix) + toIntervalHour(730)
@@ -124,7 +134,7 @@ SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1
 "
 
 clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
-CREATE TABLE IF NOT EXISTS otel_metrics_sum
+CREATE TABLE IF NOT EXISTS otel_metrics_sum ${ON_CLUSTER}
 (
     \`ResourceAttributes\` Map(LowCardinality(String), String) CODEC(ZSTD(1)),
     \`ResourceSchemaUrl\` String CODEC(ZSTD(1)),
@@ -156,7 +166,7 @@ CREATE TABLE IF NOT EXISTS otel_metrics_sum
     INDEX idx_attr_key mapKeys(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_attr_value mapValues(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1
 )
-ENGINE = MergeTree
+ENGINE = ${ENGINE}
 PARTITION BY toDate(TimeUnix)
 ORDER BY (ServiceName, MetricName, Attributes, toUnixTimestamp64Nano(TimeUnix))
 TTL toDateTime(TimeUnix) + toIntervalHour(730)
@@ -164,7 +174,7 @@ SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1
 "
 
 clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
-CREATE TABLE IF NOT EXISTS otel_metrics_histogram
+CREATE TABLE IF NOT EXISTS otel_metrics_histogram ${ON_CLUSTER}
 (
     \`ResourceAttributes\` Map(LowCardinality(String), String) CODEC(ZSTD(1)),
     \`ResourceSchemaUrl\` String CODEC(ZSTD(1)),
@@ -200,7 +210,7 @@ CREATE TABLE IF NOT EXISTS otel_metrics_histogram
     INDEX idx_attr_key mapKeys(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_attr_value mapValues(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1
 )
-ENGINE = MergeTree
+ENGINE = ${ENGINE}
 PARTITION BY toDate(TimeUnix)
 ORDER BY (ServiceName, MetricName, Attributes, toUnixTimestamp64Nano(TimeUnix))
 TTL toDateTime(TimeUnix) + toIntervalHour(730)
@@ -208,7 +218,7 @@ SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1
 "
 
 clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
-CREATE TABLE IF NOT EXISTS otel_metrics_summary
+CREATE TABLE IF NOT EXISTS otel_metrics_summary ${ON_CLUSTER}
 (
     \`ResourceAttributes\` Map(LowCardinality(String), String) CODEC(ZSTD(1)),
     \`ResourceSchemaUrl\` String CODEC(ZSTD(1)),
@@ -236,7 +246,7 @@ CREATE TABLE IF NOT EXISTS otel_metrics_summary
     INDEX idx_attr_key mapKeys(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_attr_value mapValues(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1
 )
-ENGINE = MergeTree
+ENGINE = ${ENGINE}
 PARTITION BY toDate(TimeUnix)
 ORDER BY (ServiceName, MetricName, Attributes, toUnixTimestamp64Nano(TimeUnix))
 TTL toDateTime(TimeUnix) + toIntervalHour(730)
@@ -244,7 +254,7 @@ SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1
 "
 
 clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
-CREATE TABLE IF NOT EXISTS otel_metrics_exponential_histogram
+CREATE TABLE IF NOT EXISTS otel_metrics_exponential_histogram ${ON_CLUSTER}
 (
     \`ResourceAttributes\` Map(LowCardinality(String), String) CODEC(ZSTD(1)),
     \`ResourceSchemaUrl\` String CODEC(ZSTD(1)),
@@ -284,7 +294,7 @@ CREATE TABLE IF NOT EXISTS otel_metrics_exponential_histogram
     INDEX idx_attr_key mapKeys(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_attr_value mapValues(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1
 )
-ENGINE = MergeTree
+ENGINE = ${ENGINE}
 PARTITION BY toDate(TimeUnix)
 ORDER BY (ServiceName, MetricName, Attributes, toUnixTimestamp64Nano(TimeUnix))
 TTL toDateTime(TimeUnix) + toIntervalHour(730)
@@ -292,14 +302,14 @@ SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1
 "
 
 clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
-CREATE TABLE IF NOT EXISTS otel_traces_trace_id_ts
+CREATE TABLE IF NOT EXISTS otel_traces_trace_id_ts ${ON_CLUSTER}
 (
     \`TraceId\` String CODEC(ZSTD(1)),
     \`Start\` DateTime CODEC(Delta(4), ZSTD(1)),
     \`End\` DateTime CODEC(Delta(4), ZSTD(1)),
     INDEX idx_trace_id TraceId TYPE bloom_filter(0.01) GRANULARITY 1
 )
-ENGINE = MergeTree
+ENGINE = ${ENGINE}
 PARTITION BY toDate(Start)
 ORDER BY (TraceId, Start)
 TTL toDateTime(Start) + toIntervalHour(730)
@@ -307,7 +317,7 @@ SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1
 "
 
 clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
-CREATE MATERIALIZED VIEW IF NOT EXISTS otel_traces_trace_id_ts_mv TO otel_traces_trace_id_ts
+CREATE MATERIALIZED VIEW IF NOT EXISTS otel_traces_trace_id_ts_mv ${ON_CLUSTER} TO otel_traces_trace_id_ts
 (
     \`TraceId\` String,
     \`Start\` DateTime64(9),
@@ -323,4 +333,272 @@ GROUP BY TraceId
 "
 
 echo "✅ All 9 OTEL tables created successfully"
+echo ""
+echo "Creating system tables for application state..."
+
+# ---- Users ----
+clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
+CREATE TABLE IF NOT EXISTS openlit_users ${ON_CLUSTER}
+(
+    id String,
+    name Nullable(String),
+    email String,
+    email_verified Nullable(DateTime64(3)),
+    password Nullable(String),
+    image Nullable(String),
+    has_completed_onboarding UInt8 DEFAULT 0,
+    created_at DateTime64(3) DEFAULT now64(3),
+    updated_at DateTime64(3) DEFAULT now64(3),
+
+    INDEX idx_email email TYPE bloom_filter(0.01) GRANULARITY 1
+)
+ENGINE = ${ENGINE}
+ORDER BY (id)
+SETTINGS index_granularity = 8192
+"
+
+# ---- Accounts (OAuth) ----
+clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
+CREATE TABLE IF NOT EXISTS openlit_accounts ${ON_CLUSTER}
+(
+    id String,
+    user_id String,
+    type Nullable(String),
+    provider String,
+    provider_account_id String,
+    token_type Nullable(String),
+    refresh_token Nullable(String),
+    access_token Nullable(String),
+    expires_at Nullable(Int64),
+    scope Nullable(String),
+    id_token Nullable(String),
+    created_at DateTime64(3) DEFAULT now64(3),
+    updated_at DateTime64(3) DEFAULT now64(3),
+
+    INDEX idx_user_id user_id TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_provider_account (provider, provider_account_id) TYPE bloom_filter(0.01) GRANULARITY 1
+)
+ENGINE = ${ENGINE}
+ORDER BY (id)
+SETTINGS index_granularity = 8192
+"
+
+# ---- Sessions ----
+clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
+CREATE TABLE IF NOT EXISTS openlit_sessions ${ON_CLUSTER}
+(
+    id String,
+    user_id Nullable(String),
+    session_token String,
+    access_token Nullable(String),
+    expires DateTime64(3),
+    created_at DateTime64(3) DEFAULT now64(3),
+    updated_at DateTime64(3) DEFAULT now64(3),
+
+    INDEX idx_session_token session_token TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_user_id user_id TYPE bloom_filter(0.01) GRANULARITY 1
+)
+ENGINE = ${ENGINE}
+ORDER BY (id)
+SETTINGS index_granularity = 8192
+"
+
+# ---- Verification Requests ----
+clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
+CREATE TABLE IF NOT EXISTS openlit_verification_requests ${ON_CLUSTER}
+(
+    id String,
+    identifier String,
+    token String,
+    expires DateTime64(3),
+    created_at DateTime64(3) DEFAULT now64(3),
+    updated_at DateTime64(3) DEFAULT now64(3),
+
+    INDEX idx_token token TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_identifier_token (identifier, token) TYPE bloom_filter(0.01) GRANULARITY 1
+)
+ENGINE = ${ENGINE}
+ORDER BY (id)
+SETTINGS index_granularity = 8192
+"
+
+# ---- Organisations ----
+clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
+CREATE TABLE IF NOT EXISTS openlit_organisations ${ON_CLUSTER}
+(
+    id String,
+    name String,
+    slug String,
+    created_at DateTime64(3) DEFAULT now64(3),
+    updated_at DateTime64(3) DEFAULT now64(3),
+    created_by_user_id String,
+
+    INDEX idx_slug slug TYPE bloom_filter(0.01) GRANULARITY 1
+)
+ENGINE = ${ENGINE}
+ORDER BY (id)
+SETTINGS index_granularity = 8192
+"
+
+# ---- Organisation Users ----
+clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
+CREATE TABLE IF NOT EXISTS openlit_organisation_users ${ON_CLUSTER}
+(
+    id String,
+    organisation_id String,
+    user_id String,
+    role String DEFAULT 'member',
+    is_current UInt8 DEFAULT 0,
+    created_at DateTime64(3) DEFAULT now64(3),
+    updated_at DateTime64(3) DEFAULT now64(3),
+
+    INDEX idx_org_user (organisation_id, user_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_user_id user_id TYPE bloom_filter(0.01) GRANULARITY 1
+)
+ENGINE = ${ENGINE}
+ORDER BY (id)
+SETTINGS index_granularity = 8192
+"
+
+# ---- Organisation Invited Users ----
+clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
+CREATE TABLE IF NOT EXISTS openlit_organisation_invited_users ${ON_CLUSTER}
+(
+    id String,
+    organisation_id String,
+    email String,
+    invited_by_user_id String,
+    created_at DateTime64(3) DEFAULT now64(3),
+
+    INDEX idx_org_email (organisation_id, email) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_email email TYPE bloom_filter(0.01) GRANULARITY 1
+)
+ENGINE = ${ENGINE}
+ORDER BY (id)
+SETTINGS index_granularity = 8192
+"
+
+# ---- Database Config ----
+clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
+CREATE TABLE IF NOT EXISTS openlit_database_configs ${ON_CLUSTER}
+(
+    id String,
+    name String,
+    environment String DEFAULT 'production',
+    username String DEFAULT 'admin',
+    password Nullable(String),
+    host String DEFAULT '127.0.0.1',
+    port String DEFAULT '8123',
+    \`database\` String DEFAULT 'openlit',
+    query Nullable(String),
+    created_at DateTime64(3) DEFAULT now64(3),
+    updated_at DateTime64(3) DEFAULT now64(3),
+    user_id String,
+    organisation_id Nullable(String),
+
+    INDEX idx_name_org (name, organisation_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_org organisation_id TYPE bloom_filter(0.01) GRANULARITY 1
+)
+ENGINE = ${ENGINE}
+ORDER BY (id)
+SETTINGS index_granularity = 8192
+"
+
+# ---- Database Config Users ----
+clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
+CREATE TABLE IF NOT EXISTS openlit_database_config_users ${ON_CLUSTER}
+(
+    database_config_id String,
+    user_id String,
+    is_current UInt8 DEFAULT 0,
+    can_edit UInt8 DEFAULT 0,
+    can_share UInt8 DEFAULT 0,
+    can_delete UInt8 DEFAULT 0,
+    created_at DateTime64(3) DEFAULT now64(3),
+    updated_at DateTime64(3) DEFAULT now64(3),
+
+    INDEX idx_config_user (database_config_id, user_id) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_user_id user_id TYPE bloom_filter(0.01) GRANULARITY 1
+)
+ENGINE = ${ENGINE}
+ORDER BY (database_config_id, user_id)
+SETTINGS index_granularity = 8192
+"
+
+# ---- Database Config Invited Users ----
+clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
+CREATE TABLE IF NOT EXISTS openlit_database_config_invited_users ${ON_CLUSTER}
+(
+    database_config_id String,
+    email String,
+    can_edit UInt8 DEFAULT 0,
+    can_share UInt8 DEFAULT 0,
+    can_delete UInt8 DEFAULT 0,
+
+    INDEX idx_config_email (database_config_id, email) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_email email TYPE bloom_filter(0.01) GRANULARITY 1
+)
+ENGINE = ${ENGINE}
+ORDER BY (database_config_id, email)
+SETTINGS index_granularity = 8192
+"
+
+# ---- API Keys ----
+clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
+CREATE TABLE IF NOT EXISTS openlit_api_keys ${ON_CLUSTER}
+(
+    id String,
+    name String DEFAULT 'default',
+    api_key String,
+    database_config_id String,
+    is_deleted UInt8 DEFAULT 0,
+    created_at DateTime64(3) DEFAULT now64(3),
+    created_by_user_id String,
+    deleted_at Nullable(DateTime64(3)),
+    deleted_by_user_id Nullable(String),
+
+    INDEX idx_api_key api_key TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_config_id database_config_id TYPE bloom_filter(0.01) GRANULARITY 1
+)
+ENGINE = ${ENGINE}
+ORDER BY (id)
+SETTINGS index_granularity = 8192
+"
+
+# ---- Evaluation Configs ----
+clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
+CREATE TABLE IF NOT EXISTS openlit_evaluation_configs ${ON_CLUSTER}
+(
+    id String,
+    database_config_id String,
+    provider String,
+    model String,
+    vault_id String,
+    auto UInt8 DEFAULT 0,
+    recurring_time String,
+    meta String,
+
+    INDEX idx_config_id database_config_id TYPE bloom_filter(0.01) GRANULARITY 1
+)
+ENGINE = ${ENGINE}
+ORDER BY (id)
+SETTINGS index_granularity = 8192
+"
+
+# ---- ClickHouse Migrations Tracking ----
+clickhouse-client --database="${CLICKHOUSE_DATABASE}" --query "
+CREATE TABLE IF NOT EXISTS openlit_clickhouse_migrations ${ON_CLUSTER}
+(
+    id String,
+    database_config_id String,
+    clickhouse_migration_id String,
+
+    INDEX idx_config_migration (database_config_id, clickhouse_migration_id) TYPE bloom_filter(0.01) GRANULARITY 1
+)
+ENGINE = ${ENGINE}
+ORDER BY (id)
+SETTINGS index_granularity = 8192
+"
+
+echo "✅ All system tables created successfully"
 echo "===================================================================="

@@ -2,8 +2,7 @@ import NextAuth, { AuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import GithubProvider from "next-auth/providers/github";
 import CredentialsProvider from "next-auth/providers/credentials";
-import { PrismaAdapter } from "@next-auth/prisma-adapter";
-import { PrismaClient } from "@prisma/client";
+import { ClickHouseAdapter } from "@/lib/clickhouse-auth-adapter";
 import asaw from "@/utils/asaw";
 import {
 	createNewUser,
@@ -12,31 +11,15 @@ import {
 	doesPasswordMatches,
 	getUserById,
 } from "@/lib/user";
-
-const prisma = new PrismaClient();
-
-// Create a custom adapter that normalizes emails
-function createNormalizedEmailAdapter(p: PrismaClient) {
-	const baseAdapter = PrismaAdapter(p);
-	return {
-		...baseAdapter,
-		async createUser(user: any) {
-			// Normalize email before creating user
-			if (user.email) {
-				user.email = user.email.toLowerCase().trim();
-			}
-			return baseAdapter.createUser!(user);
-		},
-		async getUserByEmail(email: string) {
-			// Normalize email before lookup
-			const normalizedEmail = email.toLowerCase().trim();
-			return baseAdapter.getUserByEmail!(normalizedEmail);
-		},
-	};
-}
+import {
+	systemQueryFirst,
+	systemInsert,
+	systemExec,
+} from "@/lib/system-db";
+import { generateId } from "@/lib/id";
 
 export const authOptions = {
-	adapter: createNormalizedEmailAdapter(prisma),
+	adapter: ClickHouseAdapter(),
 	callbacks: {
 		async jwt({ token, account, user, trigger }) {
 			// Persist the OAuth access_token and or the user id to the token right after signin
@@ -128,29 +111,32 @@ export const authOptions = {
 				if (existingUser) {
 					try {
 						// Check if Provider's account is already linked
-						const existingAccount = await prisma.account.findFirst({
-							where: {
-								userId: existingUser.id,
-								provider: account?.provider
-							}
-						});
+						const existingAccount = await systemQueryFirst<{ id: string }>(
+							`SELECT id FROM openlit_accounts WHERE user_id = {userId:String} AND provider = {provider:String} LIMIT 1`,
+							{ userId: existingUser.id, provider: account.provider }
+						);
 
 						// If Provider's account not linked, link it manually
 						if (!existingAccount) {
-							await prisma.account.create({
-								data: {
-									userId: existingUser.id,
+							const id = generateId();
+							const now = new Date().toISOString();
+							await systemInsert("openlit_accounts", [
+								{
+									id,
+									user_id: existingUser.id,
 									type: account.type,
 									provider: account.provider,
-									providerAccountId: account.providerAccountId,
-									access_token: account.access_token,
-									expires_at: account.expires_at,
-									id_token: account.id_token,
-									refresh_token: account.refresh_token,
-									scope: account.scope,
-									token_type: account.token_type,
-								}
-							});
+									provider_account_id: account.providerAccountId,
+									access_token: account.access_token ?? null,
+									expires_at: account.expires_at ?? null,
+									id_token: account.id_token ?? null,
+									refresh_token: account.refresh_token ?? null,
+									scope: account.scope ?? null,
+									token_type: account.token_type ?? null,
+									created_at: now,
+									updated_at: now,
+								},
+							]);
 						}
 
 						// Update user info if name/image is missing

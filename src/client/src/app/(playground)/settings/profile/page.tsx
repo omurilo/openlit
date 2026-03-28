@@ -6,7 +6,7 @@ import { CLIENT_EVENTS } from "@/constants/events";
 import { getUserDetails, setUser } from "@/selectors/user";
 import { useRootStore } from "@/store";
 import useFetchWrapper from "@/utils/hooks/useFetchWrapper";
-import { User } from "@prisma/client";
+import { User } from "@/lib/models";
 import { usePostHog } from "posthog-js/react";
 import { toast } from "sonner";
 import { PRIMARY_BACKGROUND } from "@/constants/common-classes";

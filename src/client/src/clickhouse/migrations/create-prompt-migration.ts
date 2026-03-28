@@ -3,24 +3,28 @@ import {
 	OPENLIT_PROMPT_VERSIONS_TABLE_NAME,
 	OPENLIT_PROMPT_VERSION_DOWNLOADS_TABLE_NAME,
 } from "@/lib/platform/prompt/table-details";
+import { getOnClusterClause, getMergeTreeEngine } from "@/clickhouse/cluster-config";
 import migrationHelper from "./migration-helper";
 
 const MIGRATION_ID = "create-prompt-table";
 
 export default async function CreatePromptMigration(databaseConfigId?: string) {
+	const onCluster = getOnClusterClause();
+	const engine = getMergeTreeEngine();
+
 	const queries = [
 		`
-      CREATE TABLE IF NOT EXISTS ${OPENLIT_PROMPTS_TABLE_NAME} (
+      CREATE TABLE IF NOT EXISTS ${OPENLIT_PROMPTS_TABLE_NAME} ${onCluster} (
           id UUID DEFAULT generateUUIDv4(),  -- Unique ID for each prompt
           name String,                       -- Unique name for the prompt
           created_by String,                 -- Who created the prompt
           created_at DateTime DEFAULT now(), -- Timestamp for when the prompt was created
           PRIMARY KEY id,                  -- Unique primary key constraint
-      ) ENGINE = MergeTree()
+      ) ENGINE = ${engine}
       ORDER BY id;
     `,
 		`
-      CREATE TABLE IF NOT EXISTS ${OPENLIT_PROMPT_VERSIONS_TABLE_NAME} (
+      CREATE TABLE IF NOT EXISTS ${OPENLIT_PROMPT_VERSIONS_TABLE_NAME} ${onCluster} (
         version_id UUID DEFAULT generateUUIDv4(),            -- Unique identifier for each version
         prompt_id UUID,                                      -- Foreign key to prompt
         updated_by String,                                   -- Who updated the version
@@ -31,11 +35,11 @@ export default async function CreatePromptMigration(databaseConfigId?: string) {
         tags String DEFAULT '[]',                              -- Tags for the version
         meta_properties String DEFAULT '{}',                   -- Meta properties for the version
         INDEX prompt_version_index (prompt_id, version) TYPE minmax GRANULARITY 1 
-      ) ENGINE = MergeTree()
+      ) ENGINE = ${engine}
       ORDER BY (prompt_id, version_id);
     `,
 		`
-      CREATE TABLE IF NOT EXISTS ${OPENLIT_PROMPT_VERSION_DOWNLOADS_TABLE_NAME} (
+      CREATE TABLE IF NOT EXISTS ${OPENLIT_PROMPT_VERSION_DOWNLOADS_TABLE_NAME} ${onCluster} (
         download_id UUID DEFAULT generateUUIDv4(),          -- Unique ID for each download
         prompt_id UUID,                                     -- Links to the prompts table
         version_id UUID,                                    -- Version id of the prompt
@@ -43,7 +47,7 @@ export default async function CreatePromptMigration(databaseConfigId?: string) {
         download_source String DEFAULT 'api',               -- Source of the download (e.g., 'python', 'typescript', 'api')
         meta_properties String DEFAULT '{}'                   -- String field with default empty object for additional properties
       ) 
-      ENGINE = MergeTree()
+      ENGINE = ${engine}
       ORDER BY (prompt_id, version_id, downloaded_at);
     `,
 	];

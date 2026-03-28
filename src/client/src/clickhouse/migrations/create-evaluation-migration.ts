@@ -1,4 +1,5 @@
 import { OPENLIT_EVALUATION_TABLE_NAME } from "@/lib/platform/evaluation/table-details";
+import { getOnClusterClause, getMergeTreeEngine } from "@/clickhouse/cluster-config";
 import migrationHelper from "./migration-helper";
 
 const MIGRATION_ID = "create-evaluation-table-2";
@@ -6,9 +7,12 @@ const MIGRATION_ID = "create-evaluation-table-2";
 export default async function CreateEvaluationMigration(
 	databaseConfigId?: string
 ) {
+	const onCluster = getOnClusterClause();
+	const engine = getMergeTreeEngine();
+
 	const queries = [
 		`
-      CREATE TABLE IF NOT EXISTS ${OPENLIT_EVALUATION_TABLE_NAME} (
+      CREATE TABLE IF NOT EXISTS ${OPENLIT_EVALUATION_TABLE_NAME} ${onCluster} (
           id UUID DEFAULT generateUUIDv4(),  -- Unique ID for each evaluation
           span_id String,
           created_at DateTime DEFAULT now(),
@@ -24,7 +28,7 @@ export default async function CreateEvaluationMigration(
 
           -- Dynamic evaluation scores
           scores Map(LowCardinality(String), Float32)  
-      ) ENGINE = MergeTree()
+      ) ENGINE = ${engine}
       ORDER BY (span_id, created_at);
     `,
 	];

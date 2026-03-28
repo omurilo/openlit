@@ -1,3 +1,4 @@
+import { getOnClusterClause, getMergeTreeEngine } from "@/clickhouse/cluster-config";
 import migrationHelper from "./migration-helper";
 import CreateCustomDashboardsSeed from "../seed/dashboards";
 
@@ -10,9 +11,12 @@ const CUSTOM_DASHBOARDS_WIDGETS_TABLE = "openlit_widget";
 const CUSTOM_DASHBOARDS_BOARD_WIDGETS_TABLE = "openlit_board_widget";
 
 export default async function CreateCustomDashboardsMigration(databaseConfigId?: string) {
+  const onCluster = getOnClusterClause();
+  const engine = getMergeTreeEngine();
+
   const queries = [
     `
-    CREATE TABLE IF NOT EXISTS ${CUSTOM_DASHBOARDS_FOLDERS_TABLE} (
+    CREATE TABLE IF NOT EXISTS ${CUSTOM_DASHBOARDS_FOLDERS_TABLE} ${onCluster} (
       id UUID DEFAULT generateUUIDv4(),      -- Unique ID for each folder
       title String,                          -- Folder title
       description String,                     -- Folder description
@@ -28,11 +32,11 @@ export default async function CreateCustomDashboardsMigration(databaseConfigId?:
       INDEX updated_at_index (updated_at) TYPE minmax GRANULARITY 1,
 
       PRIMARY KEY id
-    ) ENGINE = MergeTree()
+    ) ENGINE = ${engine}
     ORDER BY (id, title, created_at)
     `,
     `
-    CREATE TABLE IF NOT EXISTS ${CUSTOM_DASHBOARDS_BOARDS_TABLE} (
+    CREATE TABLE IF NOT EXISTS ${CUSTOM_DASHBOARDS_BOARDS_TABLE} ${onCluster} (
       id UUID DEFAULT generateUUIDv4(),      -- Unique ID for each board
       title String,                          -- Board title
       description String,                     -- Board description
@@ -52,11 +56,11 @@ export default async function CreateCustomDashboardsMigration(databaseConfigId?:
       INDEX updated_at_index (updated_at) TYPE minmax GRANULARITY 1,
 
       PRIMARY KEY id
-    ) ENGINE = MergeTree()
+    ) ENGINE = ${engine}
     ORDER BY (id, created_at);
     `,
     `
-    CREATE TABLE IF NOT EXISTS ${CUSTOM_DASHBOARDS_WIDGETS_TABLE} (
+    CREATE TABLE IF NOT EXISTS ${CUSTOM_DASHBOARDS_WIDGETS_TABLE} ${onCluster} (
       id UUID DEFAULT generateUUIDv4(),      -- Unique ID for each widget
       title String,                          -- Widget title
       description String,                     -- Widget description
@@ -73,11 +77,11 @@ export default async function CreateCustomDashboardsMigration(databaseConfigId?:
       INDEX updated_at_index (updated_at) TYPE minmax GRANULARITY 1,
       
       PRIMARY KEY id
-    ) ENGINE = MergeTree()
+    ) ENGINE = ${engine}
     ORDER BY (id, created_at)
     `,
     `
-    CREATE TABLE IF NOT EXISTS ${CUSTOM_DASHBOARDS_BOARD_WIDGETS_TABLE} (
+    CREATE TABLE IF NOT EXISTS ${CUSTOM_DASHBOARDS_BOARD_WIDGETS_TABLE} ${onCluster} (
       id UUID DEFAULT generateUUIDv4(),      -- Unique ID for board widget mapping
       board_id UUID,                         -- Reference to board
       widget_id UUID,                        -- Reference to widget
@@ -93,7 +97,7 @@ export default async function CreateCustomDashboardsMigration(databaseConfigId?:
       INDEX updated_at_index (updated_at) TYPE minmax GRANULARITY 1,
 
       PRIMARY KEY id
-    ) ENGINE = MergeTree()
+    ) ENGINE = ${engine}
     ORDER BY (id, board_id, widget_id, created_at);
     `
   ];

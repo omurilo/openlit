@@ -1,6 +1,12 @@
 import getMessage from "@/constants/messages";
 import { getDBConfigByUser } from "@/lib/db-config";
-import prisma from "@/lib/prisma";
+import {
+	systemQuery,
+	systemQueryFirst,
+	systemInsert,
+	systemExec,
+} from "@/lib/system-db";
+import { generateId } from "@/lib/id";
 import asaw from "@/utils/asaw";
 import { throwIfError } from "@/utils/error";
 import { getSecretById } from "../vault";
@@ -15,7 +21,7 @@ import Cron from "@/helpers/server/cron";
 import { jsonParse, jsonStringify } from "@/utils/json";
 import { merge } from "lodash";
 import { randomUUID } from "crypto";
-import path, { dirname } from "path";
+import path from "path";
 import { EVALUATION_TYPES } from "@/constants/evaluation-types";
 import { getEvaluationTypeDefaultPrompts } from "./evaluation-type-defaults";
 
@@ -29,6 +35,30 @@ export interface EvaluationTypeWithPrompt {
 	rules?: Array<{ ruleId: string; priority: number }>;
 	prompt?: string;
 	defaultPrompt: string;
+}
+
+interface EvalConfigRow {
+	id: string;
+	database_config_id: string;
+	provider: string;
+	model: string;
+	vault_id: string;
+	auto: number;
+	recurring_time: string;
+	meta: string;
+}
+
+function rowToEvalConfig(r: EvalConfigRow): EvaluationConfig {
+	return {
+		id: r.id,
+		databaseConfigId: r.database_config_id,
+		provider: r.provider,
+		model: r.model,
+		vaultId: r.vault_id,
+		auto: !!r.auto,
+		recurringTime: r.recurring_time,
+		meta: r.meta,
+	};
 }
 
 async function buildEvaluationTypesWithPrompts(
@@ -51,7 +81,6 @@ async function buildEvaluationTypesWithPrompts(
 
 	const builtInIds = new Set(EVALUATION_TYPES.map((et) => et.id));
 
-	// Built-in types merged with overrides
 	const builtInTypes: EvaluationTypeWithPrompt[] = EVALUATION_TYPES.map((et) => {
 		const override = overrideMap.get(et.id);
 		return {
@@ -67,7 +96,6 @@ async function buildEvaluationTypesWithPrompts(
 		};
 	});
 
-	// Custom types from user meta (not in EVALUATION_TYPES constant)
 	const customTypes: EvaluationTypeWithPrompt[] = userOverrides
 		.filter((t) => t?.id && !builtInIds.has(t.id as any))
 		.map((t) => ({
@@ -95,19 +123,16 @@ export async function getEvaluationConfig(
 		[, updatedDBConfig] = await asaw(getDBConfigByUser(true));
 	}
 
-	const [, config] = await asaw(
-		prisma.evaluationConfigs.findFirst({
-			where: {
-				databaseConfigId: updatedDBConfig!.id,
-			},
-		})
+	const row = await systemQueryFirst<EvalConfigRow>(
+		`SELECT * FROM openlit_evaluation_configs WHERE database_config_id = {configId:String} LIMIT 1`,
+		{ configId: updatedDBConfig!.id }
 	);
 
-	const updatedConfig = config as EvaluationConfig;
+	const updatedConfig = row ? rowToEvalConfig(row) : null;
 	throwIfError(!updatedConfig?.id, getMessage().EVALUATION_CONFIG_NOT_FOUND);
 
 	const { data } = await getSecretById(
-		updatedConfig.vaultId,
+		updatedConfig!.vaultId,
 		updatedDBConfig!.id,
 		excludeVaultValue
 	);
@@ -121,15 +146,15 @@ export async function getEvaluationConfig(
 		);
 	} else {
 		if (!updatedSecretData.id) {
-			updatedConfig.vaultId = "";
+			updatedConfig!.vaultId = "";
 		}
 	}
 
-	const meta = jsonParse((updatedConfig as any).meta || "{}") as Record<string, any>;
+	const meta = jsonParse(updatedConfig!.meta || "{}") as Record<string, any>;
 	const evaluationTypes = await buildEvaluationTypesWithPrompts(meta);
 
 	return {
-		...updatedConfig,
+		...updatedConfig!,
 		secret: updatedSecretData,
 		evaluationTypes,
 	};
@@ -140,7 +165,6 @@ export async function setEvaluationConfig(
 	apiURL: string
 ) {
 	const [, dbConfig] = await asaw(getDBConfigByUser(true));
-
 	throwIfError(!dbConfig?.id, getMessage().DATABASE_CONFIG_NOT_FOUND);
 
 	let err: any;
@@ -157,13 +181,11 @@ export async function setEvaluationConfig(
 	}
 
 	if (evaluationConfig.id) {
-		[, previousConfig] = await asaw(
-			prisma.evaluationConfigs.findFirst({
-				where: {
-					id: evaluationConfig.id!,
-				},
-			})
+		const row = await systemQueryFirst<EvalConfigRow>(
+			`SELECT * FROM openlit_evaluation_configs WHERE id = {id:String} LIMIT 1`,
+			{ id: evaluationConfig.id! }
 		);
+		previousConfig = row ? rowToEvalConfig(row) : undefined;
 
 		evaluationConfigId = previousConfig?.id;
 		const meta = jsonParse(previousConfig?.meta || "{}") as Record<string, any>;
@@ -173,14 +195,20 @@ export async function setEvaluationConfig(
 			cronJobId,
 		});
 		evaluationConfig = merge(previousConfig, evaluationConfig);
-		[err, data] = await asaw(
-			prisma.evaluationConfigs.update({
-				data: evaluationConfig,
-				where: {
-					id: evaluationConfig.id!,
-				},
-			})
+
+		const escaped = (evaluationConfig.meta || "").replace(/'/g, "\\'");
+		const autoVal = evaluationConfig.auto ? 1 : 0;
+		await systemExec(
+			`ALTER TABLE openlit_evaluation_configs UPDATE
+				provider = '${evaluationConfig.provider}',
+				model = '${evaluationConfig.model}',
+				vault_id = '${evaluationConfig.vaultId}',
+				auto = ${autoVal},
+				recurring_time = '${evaluationConfig.recurringTime}',
+				meta = '${escaped}'
+			WHERE id = '${evaluationConfig.id}'`
 		);
+		data = { id: evaluationConfig.id };
 	} else {
 		cronJobId = randomUUID();
 		const meta = jsonParse(evaluationConfig.meta) as Record<string, any>;
@@ -188,18 +216,23 @@ export async function setEvaluationConfig(
 			...meta,
 			cronJobId,
 		});
-		[err, data] = await asaw(
-			prisma.evaluationConfigs.create({
-				data: {
-					...evaluationConfig,
-					databaseConfigId: dbConfig!.id,
-				},
-			})
-		);
-		evaluationConfigId = data?.id;
-	}
 
-	throwIfError(err, getMessage().EVALUATION_CONFIG_SET_ERROR);
+		const id = generateId();
+		evaluationConfigId = id;
+		await systemInsert("openlit_evaluation_configs", [
+			{
+				id,
+				database_config_id: dbConfig!.id,
+				provider: evaluationConfig.provider,
+				model: evaluationConfig.model,
+				vault_id: evaluationConfig.vaultId,
+				auto: evaluationConfig.auto ? 1 : 0,
+				recurring_time: evaluationConfig.recurringTime,
+				meta: evaluationConfig.meta,
+			},
+		]);
+		data = { id };
+	}
 
 	try {
 		if (evaluationConfig.auto) {
@@ -224,15 +257,11 @@ export async function setEvaluationConfig(
 	return data;
 }
 
-/**
- * Restore cron jobs for all evaluation configs that have auto=true.
- * Called on server startup to ensure cron entries survive container restarts / new image deployments.
- */
 export async function restoreEvaluationCronJobs(apiURL: string) {
 	try {
-		const configs = await prisma.evaluationConfigs.findMany({
-			where: { auto: true },
-		});
+		const configs = await systemQuery<EvalConfigRow>(
+			`SELECT * FROM openlit_evaluation_configs WHERE auto = 1`
+		);
 
 		if (!configs?.length) {
 			console.log("No auto-evaluation configs to restore");
@@ -245,11 +274,11 @@ export async function restoreEvaluationCronJobs(apiURL: string) {
 			try {
 				const meta = jsonParse(config.meta || "{}") as Record<string, any>;
 				const cronJobId = meta?.cronJobId;
-				if (!cronJobId || !config.recurringTime) continue;
+				if (!cronJobId || !config.recurring_time) continue;
 
 				cronObject.updateCrontab({
 					cronId: cronJobId,
-					cronSchedule: config.recurringTime,
+					cronSchedule: config.recurring_time,
 					cronEnvVars: {
 						EVALUATION_CONFIG_ID: config.id,
 						API_URL: apiURL,
@@ -271,31 +300,30 @@ export async function getEvaluationConfigById(
 	id: string,
 	excludeVaultValue: boolean = true
 ): Promise<EvaluationConfigWithSecret & { evaluationTypes?: EvaluationTypeWithPrompt[] }> {
-	const [err, data] = await asaw(
-		prisma.evaluationConfigs.findFirst({
-			where: { id },
-		})
+	const row = await systemQueryFirst<EvalConfigRow>(
+		`SELECT * FROM openlit_evaluation_configs WHERE id = {id:String} LIMIT 1`,
+		{ id }
 	);
 
-	const updatedConfig = data as EvaluationConfig;
+	const updatedConfig = row ? rowToEvalConfig(row) : null;
 	throwIfError(
-		!updatedConfig?.id || err,
+		!updatedConfig?.id,
 		getMessage().EVALUATION_CONFIG_NOT_FOUND
 	);
 
 	const { data: secretData } = await getSecretById(
-		updatedConfig.vaultId,
-		updatedConfig.databaseConfigId,
+		updatedConfig!.vaultId,
+		updatedConfig!.databaseConfigId,
 		excludeVaultValue
 	);
 
 	const updatedSecretData = (secretData as Secret[])?.[0] || {};
 
-	const meta = jsonParse((updatedConfig as any).meta || "{}") as Record<string, any>;
+	const meta = jsonParse(updatedConfig!.meta || "{}") as Record<string, any>;
 	const evaluationTypes = await buildEvaluationTypesWithPrompts(meta);
 
 	return {
-		...updatedConfig,
+		...updatedConfig!,
 		secret: updatedSecretData,
 		evaluationTypes,
 	};

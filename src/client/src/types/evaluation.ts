@@ -1,7 +1,7 @@
-import { EvaluationConfigs } from "@prisma/client";
+import { EvaluationConfig as EvaluationConfigModel } from "@/lib/models";
 import { Secret } from "./vault";
 
-export interface EvaluationConfig extends EvaluationConfigs {}
+export interface EvaluationConfig extends EvaluationConfigModel {}
 
 export interface EvaluationConfigInput
 	extends Omit<EvaluationConfig, "id" | "databaseConfigId"> {

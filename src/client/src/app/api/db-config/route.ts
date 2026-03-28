@@ -1,6 +1,6 @@
 import { getDBConfigByUser, upsertDBConfig } from "@/lib/db-config";
 import asaw from "@/utils/asaw";
-import { DatabaseConfig } from "@prisma/client";
+import { DatabaseConfig } from "@/lib/models";
 
 export async function GET() {
 	const [err, res]: any = await asaw(getDBConfigByUser());

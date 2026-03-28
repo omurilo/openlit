@@ -1,12 +1,15 @@
 /**
- * Syncs rule entities (ClickHouse) with evaluation type config (Prisma).
+ * Syncs rule entities (ClickHouse) with evaluation type config.
  * Keeps both in sync when rules are added/removed from either the rule
  * detail page or the evaluation types page.
  */
 import { getEvaluationConfig } from "./config";
 import asaw from "@/utils/asaw";
 import { jsonParse, jsonStringify } from "@/utils/json";
-import prisma from "@/lib/prisma";
+import {
+	systemQueryFirst,
+	systemExec,
+} from "@/lib/system-db";
 import {
 	addRuleEntity,
 	deleteRuleEntity,
@@ -39,10 +42,10 @@ export async function addRuleToEvaluationType(
 	rules.push({ ruleId, priority });
 	types[idx] = { ...typeConfig, rules };
 	meta.evaluationTypes = types;
-	await prisma.evaluationConfigs.update({
-		where: { id: config.id },
-		data: { meta: jsonStringify(meta) },
-	});
+	const escaped = jsonStringify(meta).replace(/'/g, "\\'");
+	await systemExec(
+		`ALTER TABLE openlit_evaluation_configs UPDATE meta = '${escaped}' WHERE id = '${config.id}'`
+	);
 }
 
 /**
@@ -63,10 +66,10 @@ export async function removeRuleFromEvaluationType(
 	const rules = (typeConfig.rules || []).filter((r) => r.ruleId !== ruleId);
 	types[idx] = { ...typeConfig, rules };
 	meta.evaluationTypes = types;
-	await prisma.evaluationConfigs.update({
-		where: { id: config.id },
-		data: { meta: jsonStringify(meta) },
-	});
+	const escaped = jsonStringify(meta).replace(/'/g, "\\'");
+	await systemExec(
+		`ALTER TABLE openlit_evaluation_configs UPDATE meta = '${escaped}' WHERE id = '${config.id}'`
+	);
 }
 
 /**

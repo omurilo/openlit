@@ -36,13 +36,15 @@ export async function getCompiledPrompt(
 		err || getMessage().NO_API_KEY
 	);
 
+	const validApiInfo = apiInfo!;
+
 	const { err: promptErr, data: promptData } = await getSpecificPrompt(
 		{
 			id: promptCompiledInput.id,
 			name: promptCompiledInput.name,
 			version: promptCompiledInput.version,
 		},
-		apiInfo?.databaseConfigId
+		validApiInfo.databaseConfigId
 	);
 
 	const promptObject = (promptData as any)?.[0] || {};
@@ -58,11 +60,11 @@ export async function getCompiledPrompt(
 			promptId: promptObject.promptId,
 			metaProperties: {
 				...(promptCompiledInput.downloadMetaProperties || {}),
-				apiKeyId: apiInfo.id,
+				apiKeyId: validApiInfo.id,
 			},
 			downloadSource: promptCompiledInput.downloadSource || "api",
 		},
-		apiInfo?.databaseConfigId
+		validApiInfo.databaseConfigId
 	);
 
 	promptObject.metaProperties = jsonParse(promptObject.metaProperties);

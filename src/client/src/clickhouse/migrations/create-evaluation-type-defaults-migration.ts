@@ -1,5 +1,6 @@
 import { OPENLIT_EVALUATION_TYPE_DEFAULTS_TABLE_NAME } from "@/lib/platform/evaluation/table-details";
 import { EVALUATION_TYPE_CONTEXTS } from "@/constants/evaluation-type-contexts";
+import { getOnClusterClause, getMergeTreeEngine } from "@/clickhouse/cluster-config";
 import migrationHelper from "./migration-helper";
 
 const MIGRATION_ID = "create-evaluation-type-defaults-table-5";
@@ -12,11 +13,14 @@ const DEFAULT_PROMPTS: Array<[string, string]> = Object.entries(
 export default async function CreateEvaluationTypeDefaultsMigration(
 	databaseConfigId?: string
 ) {
+	const onCluster = getOnClusterClause();
+	const engine = getMergeTreeEngine();
+
 	const createQuery = `
-    CREATE TABLE IF NOT EXISTS ${OPENLIT_EVALUATION_TYPE_DEFAULTS_TABLE_NAME} (
+    CREATE TABLE IF NOT EXISTS ${OPENLIT_EVALUATION_TYPE_DEFAULTS_TABLE_NAME} ${onCluster} (
       id String,
       default_prompt String
-    ) ENGINE = MergeTree() ORDER BY id;
+    ) ENGINE = ${engine} ORDER BY id;
   `;
 
 	const values = DEFAULT_PROMPTS.map(([id, prompt]) => ({

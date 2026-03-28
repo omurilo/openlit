@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<!--
+  Cluster topology configuration for ClickHouse nodes.
+  Defines a cluster named "openlit_cluster" with 1 shard and 2 replicas.
+  Each ClickHouse server node mounts this file.
+-->
+<clickhouse>
+    <remote_servers>
+        <openlit_cluster>
+            <shard>
+                <internal_replication>true</internal_replication>
+                <replica>
+                    <host>clickhouse-1</host>
+                    <port>9000</port>
+                </replica>
+                <replica>
+                    <host>clickhouse-2</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+        </openlit_cluster>
+    </remote_servers>
+
+    <zookeeper>
+        <node>
+            <host>clickhouse-keeper-1</host>
+            <port>9181</port>
+        </node>
+        <node>
+            <host>clickhouse-keeper-2</host>
+            <port>9181</port>
+        </node>
+        <node>
+            <host>clickhouse-keeper-3</host>
+            <port>9181</port>
+        </node>
+    </zookeeper>
+
+    <macros>
+        <shard>01</shard>
+        <replica from_env="CLICKHOUSE_REPLICA"/>
+    </macros>
+</clickhouse>

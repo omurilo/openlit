@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/app/auth";
 import asaw from "@/utils/asaw";
 import { getUserById } from "./user";
-import { User } from "@prisma/client";
+import { User } from "@/lib/models";
 
 export async function getCurrentUser({
 	selectPassword,
